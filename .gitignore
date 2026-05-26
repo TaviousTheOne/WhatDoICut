@@ -1,0 +1,11 @@
+# Ignore Visual Studio junk
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Python ignores
+__pycache__/
+*.pyc
+.env/
