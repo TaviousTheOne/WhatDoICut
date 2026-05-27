@@ -2,46 +2,22 @@ import requests
 import re
 
 # ------------------------------------------------------------
-# Scryfall Cache + Helpers
+# Scryfall helper (NO caching, NO image data)
 # ------------------------------------------------------------
 
-_scryfall_cache = {}
-
-def get_scryfall_card(name: str):
-    """Fetch card from Scryfall with image normalization."""
-    key = name.lower()
-    if key in _scryfall_cache:
-        return _scryfall_cache[key]
-
+def get_oracle_data(name: str):
+    """Fetch only oracle_text and type_line from Scryfall. Never cache."""
     url = f"https://api.scryfall.com/cards/named?exact={name}"
     r = requests.get(url).json()
 
-    # Normalize image_uris so app.py's get_card_image() always works
-    if "image_uris" not in r:
-        if "card_faces" in r:
-            try:
-                r["image_uris"] = r["card_faces"][0]["image_uris"]
-            except:
-                pass
+    # MDFC handling
+    oracle = r.get("oracle_text", "")
+    if not oracle and "card_faces" in r:
+        oracle = " ".join(face.get("oracle_text", "") for face in r["card_faces"])
 
-    _scryfall_cache[key] = r
-    return r
+    type_line = r.get("type_line", "").lower()
 
-
-def get_type_and_text(name: str):
-    """Return (type_line, oracle_text) for any card, including MDFCs."""
-    data = get_scryfall_card(name)
-    type_line = data.get("type_line", "").lower()
-    oracle_text = data.get("oracle_text", "").lower()
-
-    # MDFCs store text on faces
-    if not oracle_text and "card_faces" in data:
-        oracle_text = " ".join(
-            f.get("oracle_text", "").lower()
-            for f in data["card_faces"]
-        )
-
-    return type_line, oracle_text
+    return type_line.lower(), oracle.lower()
 
 
 # ------------------------------------------------------------
@@ -110,7 +86,7 @@ def fetch_archidekt(url: str):
 
 
 # ------------------------------------------------------------
-# Commander Profile (tribal + tokens + triggers)
+# Commander Profile (oracle‑text based)
 # ------------------------------------------------------------
 
 def analyze_commander(commander_names):
@@ -123,16 +99,11 @@ def analyze_commander(commander_names):
     oracle_blob = ""
 
     for name in commander_names:
-        t, o = get_type_and_text(name)
+        t, o = get_oracle_data(name)
         type_blob += " " + t
         oracle_blob += " " + o
 
     # Infer tribe from type line
-    if "creature —" in type_blob:
-        after = type_blob.split("creature —", 1)[1].strip()
-        tribe = after.split()[0]
-
-    # Common tribes fallback
     common_tribes = [
         "goblin", "elf", "zombie", "soldier", "wizard",
         "dragon", "angel", "vampire", "merfolk", "sliver",
@@ -140,7 +111,8 @@ def analyze_commander(commander_names):
     ]
     for t in common_tribes:
         if t in type_blob:
-            tribe = tribe or t
+            tribe = t
+            break
 
     # Token engine?
     if "token" in oracle_blob or "create" in oracle_blob:
@@ -164,11 +136,11 @@ def analyze_commander(commander_names):
 
 
 # ------------------------------------------------------------
-# Card Scoring Engine (tribal + tokens + oracle)
+# Card Scoring Engine (oracle‑text synergy)
 # ------------------------------------------------------------
 
 def score_card(card_name: str, commander_profile: dict):
-    type_line, oracle_text = get_type_and_text(card_name)
+    type_line, oracle_text = get_oracle_data(card_name)
     tribe = commander_profile["tribe"]
 
     score = 0.0
@@ -199,7 +171,7 @@ def score_card(card_name: str, commander_profile: dict):
         if "attack" in oracle_text or "attacks" in oracle_text:
             score += 0.20
 
-    # Generic roles (oracle-based)
+    # Generic roles
     roles = {
         "ramp": ["add {", "treasure", "landfall"],
         "draw": ["draw a card", "draw two cards"],
@@ -215,10 +187,6 @@ def score_card(card_name: str, commander_profile: dict):
         if cmd.split()[0].lower() in oracle_text:
             score += 0.20
 
-    # Efficiency (cheap cards slightly better)
-    cmc = get_scryfall_card(card_name).get("cmc", 3)
-    score += max(0.0, 0.25 - 0.03 * (cmc - 3))
-
     return min(max(score, 0.0), 1.0)
 
 
@@ -229,9 +197,8 @@ def score_card(card_name: str, commander_profile: dict):
 def explain_cut(card, commander_names):
     name = card["name"]
     score = card["score"]
-    type_line, oracle_text = get_type_and_text(name)
+    type_line, oracle_text = get_oracle_data(name)
     commander_profile = analyze_commander(commander_names)
-
     tribe = commander_profile["tribe"]
 
     reasons = []
@@ -318,23 +285,34 @@ def analyze_deck_from_url(url: str):
 
 
 # ------------------------------------------------------------
-# CLI (optional)
+# CLI Entry Point
 # ------------------------------------------------------------
 
 def main():
-    print("=== What Do I Cut? ===")
+    print("=======================================")
+    print("     MTG Commander – What Do I Cut")
+    print("=======================================")
+
     while True:
-        url = input("\nPaste deck URL:\n> ").strip()
+        url = input("\nPaste an Archidekt or Moxfield deck link:\n> ").strip()
+
         try:
             result = analyze_deck_from_url(url)
-            print("\nCommander:", ", ".join(result["commander"]))
-            print("\nTop 5 Cuts:")
-            for c in result["cuts"]:
-                print(f"- {c['name']} ({c['score']:.3f})")
-        except Exception as e:
-            print("Error:", e)
 
-        if input("\nAgain (y/n): ").lower() != "y":
+            commander = result["commander"]
+            cuts = result["cuts"]
+
+            print(f"\nCommander: {', '.join(commander)}")
+            print("\nThese are the top 5 cards that bring in the least value for what your deck is trying to do:\n")
+            for entry in cuts:
+                print(f"- {entry['name']} (score: {entry['score']:.3f})")
+
+        except Exception as e:
+            print(f"\nError: {e}")
+
+        again = input("\nAnalyze another deck? (y/n): ").strip().lower()
+        if again != "y":
+            print("\nGood luck with your brewing, Tavious")
             break
 
 

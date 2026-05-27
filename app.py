@@ -5,22 +5,26 @@ import requests
 app = Flask(__name__)
 
 # ------------------------------------------------------------
-# Fetch card image from Scryfall (handles double-faced cards)
+# Fetch card image from Scryfall (handles MDFCs safely)
 # ------------------------------------------------------------
 def get_card_image(card_name):
     url = f"https://api.scryfall.com/cards/named?exact={card_name}"
     r = requests.get(url).json()
 
-    # Single-faced card
-    if "image_uris" in r:
-        return r["image_uris"].get("normal")
+    # MDFC normalization
+    if "image_uris" not in r and "card_faces" in r:
+        for face in r["card_faces"]:
+            if "image_uris" in face:
+                r["image_uris"] = face["image_uris"]
+                break
 
-    # Double-faced card
-    if "card_faces" in r:
-        try:
-            return r["card_faces"][0]["image_uris"]["normal"]
-        except:
-            pass
+    if "image_uris" not in r:
+        return None
+
+    # Try preferred sizes in order
+    for size in ["normal", "large", "png", "border_crop", "small"]:
+        if size in r["image_uris"]:
+            return r["image_uris"][size]
 
     return None
 
@@ -36,6 +40,7 @@ def home():
         deck_url = request.form.get("deck_url")
 
         try:
+            # Score deck (no images involved)
             results = analyze_deck_from_url(deck_url)
 
             # Commander images
