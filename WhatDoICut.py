@@ -121,6 +121,7 @@ def explain_cut(card, commander_names):
     name = card["name"]
     score = card["score"]
 
+    # Fetch card type from Scryfall
     try:
         scry = requests.get(
             f"https://api.scryfall.com/cards/named?exact={name}"
@@ -131,6 +132,7 @@ def explain_cut(card, commander_names):
     
     reasons = []
 
+    # Score tiers
     if score < 0.10:
         reasons.append("Very low impact and contributes little to your overall game plan")
     elif score < 0.15:
@@ -138,6 +140,7 @@ def explain_cut(card, commander_names):
     elif score < 0.20:
         reasons.append("Low contribution compared to other options in your colors")
 
+    # Card type heuristics
     if "creature" in card_type:
         reasons.append("Creature provides minimal synergy with your commander’s strategy")
     if "artifact" in card_type:
@@ -149,6 +152,7 @@ def explain_cut(card, commander_names):
     if "land" in card_type:
         reasons.append("Land provides little functional value beyond basic mana production")
 
+    # Role-based heuristics
     name_lower = name.lower()
     roles = {
         "ramp": ["signet", "talisman", "sol ring", "cultivate", "kodama"],
@@ -172,9 +176,11 @@ def explain_cut(card, commander_names):
     elif matched_role == "wincon":
         reasons.append("Win condition is slow or poorly aligned with your commander")
 
+    # Commander synergy
     if not any(cmd.lower().split()[0] in name_lower for cmd in commander_names):
         reasons.append("Does not meaningfully synergize with your commander")
 
+    # Fallback
     if not reasons:
         reasons.append("Lower synergy and efficiency compared to other options")
 
@@ -251,7 +257,7 @@ def main():
 
         again = input("\nAnalyze another deck? (y/n): ").strip().lower()
         if again != "y":
-            print("\nGood luck with your brewing, Tavious")
+            print("\nGood luck with your brewing. -Tavious")
             break
 
 

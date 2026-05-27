@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request
-from WhatDoICut import analyze_deck_from_url
+from WhatDoICut import analyze_deck_from_url, explain_cut
 import requests
 
 app = Flask(__name__)
@@ -23,34 +23,6 @@ def get_card_image(card_name):
             pass
 
     return None
-
-
-# ------------------------------------------------------------
-# Explain WHY a card scored low
-# ------------------------------------------------------------
-def explain_cut(card):
-    score = card["score"]
-    name = card["name"].lower()
-
-    reasons = []
-
-    # Example heuristics — adjust based on your scoring engine
-    if score < 0.2:
-        reasons.append("Very low synergy with commander or deck theme")
-    if "land" in name and score < 0.3:
-        reasons.append("Land provides minimal utility compared to alternatives")
-    if "artifact" in name and score < 0.3:
-        reasons.append("Low-impact artifact with limited synergy")
-    if "creature" in name and score < 0.3:
-        reasons.append("Creature does not contribute meaningfully to strategy")
-    if score < 0.1:
-        reasons.append("Card is generally underpowered in Commander")
-
-    # Fallback
-    if not reasons:
-        reasons.append("Lower synergy and efficiency compared to other options")
-
-    return " • ".join(reasons)
 
 
 # ------------------------------------------------------------
@@ -78,7 +50,7 @@ def home():
             # Add images + reasons to each cut
             for c in results["cuts"]:
                 c["image"] = get_card_image(c["name"])
-                c["reason"] = explain_cut(c)
+                c["reason"] = explain_cut(c, results["commander"])
 
         except Exception as e:
             results = {"error": str(e)}
