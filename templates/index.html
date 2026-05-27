@@ -17,7 +17,7 @@
 
         /* Bigger logo (200% increase) */
         .logo {
-            width: 440px; /* was ~220px, now 200% */
+            width: 440px;
             height: auto;
             margin-bottom: 15px;
             filter: drop-shadow(0 0 6px #000);
@@ -27,6 +27,16 @@
         .header-section {
             text-align: center;
             margin-bottom: 40px;
+        }
+
+        /* Summary paragraph */
+        .summary {
+            max-width: 700px;
+            margin: 10px auto 30px auto;
+            font-size: 1.1rem;
+            line-height: 1.55;
+            color: #cccccc;
+            text-align: center;
         }
 
         /* Input card (centered) */
@@ -44,7 +54,7 @@
             display: flex;
             flex-wrap: wrap;
             gap: 20px;
-            justify-content: flex-start; /* LEFT aligned */
+            justify-content: flex-start;
         }
 
         /* Medium card size */
@@ -82,6 +92,14 @@
     <div class="header-section">
         <img src="{{ url_for('static', filename='logo.png') }}" class="logo" alt="Logo">
         <h1 class="mt-3">What Do I Cut?</h1>
+
+        <p class="summary">
+            This tool analyzes your Commander deck by pulling real card data from Archidekt, Moxfield, 
+            and Scryfall. Each card is scored for synergy with your commander, its role in the deck 
+            (like ramp, draw, or removal), and its overall efficiency compared to common Commander 
+            staples. Using these signals, the tool identifies the five lowest‑value cards in your list 
+            to help you decide what to cut.
+        </p>
     </div>
 
     <!-- Input Form (centered) -->
