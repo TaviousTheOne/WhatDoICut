@@ -22,17 +22,31 @@ def fetch_moxfield(url: str):
     api_url = f"https://api.moxfield.com/v2/decks/all/{deck_id}"
     data = requests.get(api_url).json()
 
+    # -----------------------------
+    # Commander(s)
+    # -----------------------------
     commander = []
-    if "commanders" in data:
-        for c in data["commanders"]:
-            commander.append(c["card"]["name"])
 
+    # Standard commander field (dict)
+    if "commanders" in data and isinstance(data["commanders"], dict):
+        for entry in data["commanders"].values():
+            commander.append(entry["card"]["name"])
+
+    # Partner commanders (also dict)
+    if not commander and "partners" in data and isinstance(data["partners"], dict):
+        for entry in data["partners"].values():
+            commander.append(entry["card"]["name"])
+
+    # -----------------------------
+    # Mainboard cards (dict)
+    # -----------------------------
     cards = []
-    for entry in data["mainboard"].values():
-        cards.append({
-            "name": entry["card"]["name"],
-            "qty": entry["quantity"]
-        })
+    if "mainboard" in data and isinstance(data["mainboard"], dict):
+        for entry in data["mainboard"].values():
+            cards.append({
+                "name": entry["card"]["name"],
+                "qty": entry["quantity"]
+            })
 
     return {
         "commander": commander,
