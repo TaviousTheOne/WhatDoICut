@@ -1,40 +1,51 @@
 import requests
 import re
 
-# Simple in-memory cache to avoid hammering Scryfall
+# ------------------------------------------------------------
+# Scryfall Cache + Helpers
+# ------------------------------------------------------------
+
 _scryfall_cache = {}
 
-
-# ------------------------------------------------------------
-# 0. SCRYFALL HELPERS
-# ------------------------------------------------------------
-
 def get_scryfall_card(name: str):
+    """Fetch card from Scryfall with image normalization."""
     key = name.lower()
     if key in _scryfall_cache:
         return _scryfall_cache[key]
 
     url = f"https://api.scryfall.com/cards/named?exact={name}"
     r = requests.get(url).json()
+
+    # Normalize image_uris so app.py's get_card_image() always works
+    if "image_uris" not in r:
+        if "card_faces" in r:
+            try:
+                r["image_uris"] = r["card_faces"][0]["image_uris"]
+            except:
+                pass
+
     _scryfall_cache[key] = r
     return r
 
 
 def get_type_and_text(name: str):
+    """Return (type_line, oracle_text) for any card, including MDFCs."""
     data = get_scryfall_card(name)
     type_line = data.get("type_line", "").lower()
     oracle_text = data.get("oracle_text", "").lower()
-    # Double-faced cards sometimes store text on faces
+
+    # MDFCs store text on faces
     if not oracle_text and "card_faces" in data:
-        faces = data["card_faces"]
         oracle_text = " ".join(
-            f.get("oracle_text", "").lower() for f in faces
+            f.get("oracle_text", "").lower()
+            for f in data["card_faces"]
         )
+
     return type_line, oracle_text
 
 
 # ------------------------------------------------------------
-# 1. URL DETECTION
+# URL Detection
 # ------------------------------------------------------------
 
 def detect_platform(url: str):
@@ -46,7 +57,7 @@ def detect_platform(url: str):
 
 
 # ------------------------------------------------------------
-# 2. FETCH DECK DATA
+# Deck Fetchers
 # ------------------------------------------------------------
 
 def fetch_moxfield(url: str):
@@ -55,27 +66,23 @@ def fetch_moxfield(url: str):
     data = requests.get(api_url).json()
 
     commander = []
-
-    if "commanders" in data and isinstance(data["commanders"], dict):
+    if "commanders" in data:
         for entry in data["commanders"].values():
             commander.append(entry["card"]["name"])
 
-    if not commander and "partners" in data and isinstance(data["partners"], dict):
+    if not commander and "partners" in data:
         for entry in data["partners"].values():
             commander.append(entry["card"]["name"])
 
     cards = []
-    if "mainboard" in data and isinstance(data["mainboard"], dict):
+    if "mainboard" in data:
         for entry in data["mainboard"].values():
             cards.append({
                 "name": entry["card"]["name"],
                 "qty": entry["quantity"]
             })
 
-    return {
-        "commander": commander,
-        "cards": cards
-    }
+    return {"commander": commander, "cards": cards}
 
 
 def fetch_archidekt(url: str):
@@ -99,46 +106,33 @@ def fetch_archidekt(url: str):
                 "qty": card["quantity"]
             })
 
-    return {
-        "commander": commander,
-        "cards": cards
-    }
+    return {"commander": commander, "cards": cards}
 
 
 # ------------------------------------------------------------
-# 3. COMMANDER PROFILE (TRIBAL + TOKENS)
+# Commander Profile (tribal + tokens + triggers)
 # ------------------------------------------------------------
 
 def analyze_commander(commander_names):
-    """
-    Build a profile of what the commander is doing:
-    - primary tribe (if any)
-    - whether it makes tokens
-    - whether it cares about attacking / dying
-    """
     tribe = None
     makes_tokens = False
     cares_about_death = False
     cares_about_attack = False
 
-    oracle_blob = ""
     type_blob = ""
+    oracle_blob = ""
 
     for name in commander_names:
-        type_line, oracle_text = get_type_and_text(name)
-        type_blob += " " + type_line
-        oracle_blob += " " + oracle_text
+        t, o = get_type_and_text(name)
+        type_blob += " " + t
+        oracle_blob += " " + o
 
-    # Try to infer tribe from type line (first creature type after "—")
-    # e.g. "legendary creature — goblin warrior"
-    tribe_candidates = []
+    # Infer tribe from type line
     if "creature —" in type_blob:
-        after_dash = type_blob.split("creature —", 1)[1].strip()
-        # take first word as primary tribe
-        first_word = after_dash.split()[0]
-        tribe_candidates.append(first_word)
+        after = type_blob.split("creature —", 1)[1].strip()
+        tribe = after.split()[0]
 
-    # Also look for common tribes in type line
+    # Common tribes fallback
     common_tribes = [
         "goblin", "elf", "zombie", "soldier", "wizard",
         "dragon", "angel", "vampire", "merfolk", "sliver",
@@ -146,17 +140,18 @@ def analyze_commander(commander_names):
     ]
     for t in common_tribes:
         if t in type_blob:
-            tribe_candidates.append(t)
+            tribe = tribe or t
 
-    tribe = tribe_candidates[0] if tribe_candidates else None
-
-    text = oracle_blob
-
-    if "token" in text or "create" in text:
+    # Token engine?
+    if "token" in oracle_blob or "create" in oracle_blob:
         makes_tokens = True
-    if "dies" in text or "whenever another creature" in text:
+
+    # Death triggers?
+    if "dies" in oracle_blob or "whenever another creature" in oracle_blob:
         cares_about_death = True
-    if "attack" in text or "attacks" in text:
+
+    # Attack triggers?
+    if "attack" in oracle_blob or "attacks" in oracle_blob:
         cares_about_attack = True
 
     return {
@@ -164,103 +159,80 @@ def analyze_commander(commander_names):
         "makes_tokens": makes_tokens,
         "cares_about_death": cares_about_death,
         "cares_about_attack": cares_about_attack,
-        "oracle_text": oracle_blob,
-        "type_line": type_blob,
         "names": commander_names,
     }
 
 
 # ------------------------------------------------------------
-# 4. CARD SCORING ENGINE (TRIBAL + TOKENS + ORACLE)
+# Card Scoring Engine (tribal + tokens + oracle)
 # ------------------------------------------------------------
 
 def score_card(card_name: str, commander_profile: dict):
     type_line, oracle_text = get_type_and_text(card_name)
-    name_lower = card_name.lower()
-
     tribe = commander_profile["tribe"]
-    makes_tokens_cmd = commander_profile["makes_tokens"]
-    cares_about_death_cmd = commander_profile["cares_about_death"]
-    cares_about_attack_cmd = commander_profile["cares_about_attack"]
 
     score = 0.0
 
-    # --- Tribal synergy ---
+    # Tribal synergy
     if tribe:
         if tribe in type_line:
-            score += 0.45  # same creature type as commander (e.g. Goblin)
+            score += 0.45
         if tribe in oracle_text:
-            score += 0.25  # references tribe in rules text
+            score += 0.25
 
-    # --- Token synergy ---
-    if makes_tokens_cmd:
+    # Token synergy
+    if commander_profile["makes_tokens"]:
         if "token" in oracle_text or "create" in oracle_text:
             score += 0.25
         if "1/1" in oracle_text:
             score += 0.10
 
-    # --- Death / sacrifice synergy ---
-    if cares_about_death_cmd:
-        if "dies" in oracle_text or "whenever another creature" in oracle_text:
+    # Death synergy
+    if commander_profile["cares_about_death"]:
+        if "dies" in oracle_text:
             score += 0.20
         if "sacrifice" in oracle_text:
             score += 0.15
 
-    # --- Attack synergy ---
-    if cares_about_attack_cmd:
+    # Attack synergy
+    if commander_profile["cares_about_attack"]:
         if "attack" in oracle_text or "attacks" in oracle_text:
             score += 0.20
 
-    # --- Generic roles (from oracle text, not name) ---
+    # Generic roles (oracle-based)
     roles = {
         "ramp": ["add {", "treasure", "landfall"],
-        "draw": ["draw a card", "draw two cards", "card for each"],
+        "draw": ["draw a card", "draw two cards"],
         "removal": ["destroy target", "exile target", "damage to target"],
-        "wincon": ["extra turn", "you win the game", "cannot lose the game"],
+        "wincon": ["extra turn", "you win the game"],
     }
-
-    role_score = 0.0
     for keywords in roles.values():
         if any(k in oracle_text for k in keywords):
-            role_score += 0.20
-
-    score += role_score
-
-    # --- Commander name / direct synergy ---
-    for cmd in commander_profile["names"]:
-        cmd_first = cmd.split()[0].lower()
-        if cmd_first in oracle_text:
             score += 0.20
 
-    # --- Small efficiency heuristic: cheaper cards slightly better ---
+    # Commander name synergy
+    for cmd in commander_profile["names"]:
+        if cmd.split()[0].lower() in oracle_text:
+            score += 0.20
+
+    # Efficiency (cheap cards slightly better)
     cmc = get_scryfall_card(card_name).get("cmc", 3)
-    efficiency = max(0.0, 0.25 - 0.03 * (cmc - 3))
-    score += efficiency
+    score += max(0.0, 0.25 - 0.03 * (cmc - 3))
 
-    # Clamp
-    if score < 0:
-        score = 0.0
-    if score > 1:
-        score = 1.0
-
-    return score
+    return min(max(score, 0.0), 1.0)
 
 
 # ------------------------------------------------------------
-# 5. EXPLANATION ENGINE (USES SAME PROFILE)
+# Explanation Engine
 # ------------------------------------------------------------
 
 def explain_cut(card, commander_names):
     name = card["name"]
     score = card["score"]
-
-    commander_profile = analyze_commander(commander_names)
-    tribe = commander_profile["tribe"]
-    makes_tokens_cmd = commander_profile["makes_tokens"]
-    cares_about_death_cmd = commander_profile["cares_about_death"]
-    cares_about_attack_cmd = commander_profile["cares_about_attack"]
-
     type_line, oracle_text = get_type_and_text(name)
+    commander_profile = analyze_commander(commander_names)
+
+    tribe = commander_profile["tribe"]
 
     reasons = []
 
@@ -270,51 +242,46 @@ def explain_cut(card, commander_names):
     elif score < 0.20:
         reasons.append("Below-average synergy for what your commander is trying to do")
 
-    # Tribal explanation
-    if tribe:
-        if tribe not in type_line and tribe not in oracle_text:
-            reasons.append(f"Does not strongly support your {tribe} tribal game plan")
+    # Tribal
+    if tribe and tribe not in type_line and tribe not in oracle_text:
+        reasons.append(f"Does not strongly support your {tribe} tribal game plan")
 
-    # Token explanation
-    if makes_tokens_cmd:
+    # Token synergy
+    if commander_profile["makes_tokens"]:
         if "token" not in oracle_text and "create" not in oracle_text:
             reasons.append("Provides little payoff or support for your token generation")
-    
-    # Death / sacrifice explanation
-    if cares_about_death_cmd and ("dies" not in oracle_text and "sacrifice" not in oracle_text):
-        reasons.append("Does not take advantage of your death/sacrifice synergies")
 
-    # Attack explanation
-    if cares_about_attack_cmd and ("attack" not in oracle_text and "attacks" not in oracle_text):
-        reasons.append("Does not meaningfully reward your attacking game plan")
+    # Death synergy
+    if commander_profile["cares_about_death"]:
+        if "dies" not in oracle_text and "sacrifice" not in oracle_text:
+            reasons.append("Does not take advantage of your death/sacrifice synergies")
 
-    # Generic role explanation
-    if "draw a card" not in oracle_text and "destroy target" not in oracle_text \
-       and "exile target" not in oracle_text and "add {" not in oracle_text:
+    # Attack synergy
+    if commander_profile["cares_about_attack"]:
+        if "attack" not in oracle_text and "attacks" not in oracle_text:
+            reasons.append("Does not meaningfully reward your attacking game plan")
+
+    # Generic utility
+    if not any(k in oracle_text for k in ["draw a card", "destroy target", "exile target", "add {"]):
         reasons.append("Offers limited card advantage, removal, or mana acceleration")
 
     # Commander name synergy
-    name_lower = name.lower()
     if not any(cmd.split()[0].lower() in oracle_text for cmd in commander_names):
         reasons.append("Lacks direct, text-level synergy with your commander")
 
-    if not reasons:
-        reasons.append("Lower overall synergy and utility than other available options")
-
-    # Make it compact
-    # Remove duplicates while preserving order
+    # Deduplicate
     seen = set()
-    unique_reasons = []
+    final = []
     for r in reasons:
         if r not in seen:
             seen.add(r)
-            unique_reasons.append(r)
+            final.append(r)
 
-    return " • ".join(unique_reasons)
+    return " • ".join(final)
 
 
 # ------------------------------------------------------------
-# 6. ANALYZE DECK
+# Deck Analysis
 # ------------------------------------------------------------
 
 def analyze_deck(deck):
@@ -325,19 +292,15 @@ def analyze_deck(deck):
 
     scored = []
     for c in cards:
-        score = score_card(c["name"], commander_profile)
-        scored.append({
-            "name": c["name"],
-            "qty": c["qty"],
-            "score": score
-        })
+        s = score_card(c["name"], commander_profile)
+        scored.append({"name": c["name"], "qty": c["qty"], "score": s})
 
     scored.sort(key=lambda x: x["score"])
     return scored[:5]
 
 
 # ------------------------------------------------------------
-# 7. PUBLIC API
+# Public API
 # ------------------------------------------------------------
 
 def analyze_deck_from_url(url: str):
@@ -348,44 +311,30 @@ def analyze_deck_from_url(url: str):
     else:
         deck = fetch_archidekt(url)
 
-    bottom_five = analyze_deck(deck)
-
     return {
         "commander": deck["commander"],
-        "cuts": bottom_five
+        "cuts": analyze_deck(deck)
     }
 
 
 # ------------------------------------------------------------
-# 8. CLI ENTRY POINT
+# CLI (optional)
 # ------------------------------------------------------------
 
 def main():
-    print("=======================================")
-    print("     MTG Commander – What Do I Cut")
-    print("=======================================")
-
+    print("=== What Do I Cut? ===")
     while True:
-        url = input("\nPaste an Archidekt or Moxfield deck link:\n> ").strip()
-
+        url = input("\nPaste deck URL:\n> ").strip()
         try:
             result = analyze_deck_from_url(url)
-
-            commander = result["commander"]
-            cuts = result["cuts"]
-
-            print(f"\nCommander: {', '.join(commander)}")
-
-            print("\nThese are the top 5 cards that bring in the least value for what your deck is trying to do:\n")
-            for entry in cuts:
-                print(f"- {entry['name']} (score: {entry['score']:.3f})")
-
+            print("\nCommander:", ", ".join(result["commander"]))
+            print("\nTop 5 Cuts:")
+            for c in result["cuts"]:
+                print(f"- {c['name']} ({c['score']:.3f})")
         except Exception as e:
-            print(f"\nError: {e}")
+            print("Error:", e)
 
-        again = input("\nAnalyze another deck? (y/n): ").strip().lower()
-        if again != "y":
-            print("\nGood luck with your brewing, Tavious")
+        if input("\nAgain (y/n): ").lower() != "y":
             break
 
 
