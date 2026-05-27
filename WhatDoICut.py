@@ -22,24 +22,16 @@ def fetch_moxfield(url: str):
     api_url = f"https://api.moxfield.com/v2/decks/all/{deck_id}"
     data = requests.get(api_url).json()
 
-    # -----------------------------
-    # Commander(s)
-    # -----------------------------
     commander = []
 
-    # Standard commander field (dict)
     if "commanders" in data and isinstance(data["commanders"], dict):
         for entry in data["commanders"].values():
             commander.append(entry["card"]["name"])
 
-    # Partner commanders (also dict)
     if not commander and "partners" in data and isinstance(data["partners"], dict):
         for entry in data["partners"].values():
             commander.append(entry["card"]["name"])
 
-    # -----------------------------
-    # Mainboard cards (dict)
-    # -----------------------------
     cards = []
     if "mainboard" in data and isinstance(data["mainboard"], dict):
         for entry in data["mainboard"].values():
@@ -82,19 +74,17 @@ def fetch_archidekt(url: str):
 
 
 # ------------------------------------------------------------
-# 3. CARD SCORING ENGINE (placeholder heuristic)
+# 3. CARD SCORING ENGINE
 # ------------------------------------------------------------
 
 def score_card(card_name: str, commander_names: list):
     name = card_name.lower()
 
-    # --- Synergy scoring (placeholder) ---
     synergy = 0
     for cmd in commander_names:
         if cmd.split()[0].lower() in name:
             synergy += 0.4
 
-    # --- Role scoring ---
     roles = {
         "ramp": ["signet", "talisman", "sol ring", "cultivate", "kodama"],
         "draw": ["draw", "ponder", "opt", "study", "vision"],
@@ -107,10 +97,8 @@ def score_card(card_name: str, commander_names: list):
         if any(k in name for k in keywords):
             role_score += 0.3
 
-    # --- Efficiency scoring ---
     efficiency = max(0, 0.3 - (len(name) * 0.005))
 
-    # --- Redundancy & curve (placeholder) ---
     redundancy = 0.1
     curve = 0.1
 
@@ -126,7 +114,75 @@ def score_card(card_name: str, commander_names: list):
 
 
 # ------------------------------------------------------------
-# 4. ANALYZE DECK
+# 4. EXPLANATION ENGINE (IMPROVED)
+# ------------------------------------------------------------
+
+def explain_cut(card, commander_names):
+    name = card["name"]
+    score = card["score"]
+
+    try:
+        scry = requests.get(
+            f"https://api.scryfall.com/cards/named?exact={name}"
+        ).json()
+        card_type = scry.get("type_line", "").lower()
+    except:
+        card_type = ""
+    
+    reasons = []
+
+    if score < 0.10:
+        reasons.append("Very low impact and contributes little to your overall game plan")
+    elif score < 0.15:
+        reasons.append("Weak synergy and limited strategic value")
+    elif score < 0.20:
+        reasons.append("Low contribution compared to other options in your colors")
+
+    if "creature" in card_type:
+        reasons.append("Creature provides minimal synergy with your commander’s strategy")
+    if "artifact" in card_type:
+        reasons.append("Artifact offers low utility relative to common Commander staples")
+    if "enchantment" in card_type:
+        reasons.append("Enchantment does not meaningfully support your deck’s core plan")
+    if "instant" in card_type or "sorcery" in card_type:
+        reasons.append("Spell is less efficient than similar effects available in your colors")
+    if "land" in card_type:
+        reasons.append("Land provides little functional value beyond basic mana production")
+
+    name_lower = name.lower()
+    roles = {
+        "ramp": ["signet", "talisman", "sol ring", "cultivate", "kodama"],
+        "draw": ["draw", "ponder", "opt", "study", "vision"],
+        "removal": ["destroy", "exile", "counter", "path", "swords"],
+        "wincon": ["overrun", "combo", "infinite", "extra turn"],
+    }
+
+    matched_role = None
+    for role, keywords in roles.items():
+        if any(k in name_lower for k in keywords):
+            matched_role = role
+            break
+
+    if matched_role == "ramp":
+        reasons.append("Ramp piece is redundant or less efficient than alternatives")
+    elif matched_role == "draw":
+        reasons.append("Card draw option is weaker than other available choices")
+    elif matched_role == "removal":
+        reasons.append("Removal spell is outclassed by more flexible or cheaper options")
+    elif matched_role == "wincon":
+        reasons.append("Win condition is slow or poorly aligned with your commander")
+
+    if not any(cmd.lower().split()[0] in name_lower for cmd in commander_names):
+        reasons.append("Does not meaningfully synergize with your commander")
+
+    if not reasons:
+        reasons.append("Lower synergy and efficiency compared to other options")
+
+    return " • ".join(reasons)
+
+
+# ------------------------------------------------------------
+# 5. ANALYZE DECK
 # ------------------------------------------------------------
 
 def analyze_deck(deck):
@@ -147,7 +203,7 @@ def analyze_deck(deck):
 
 
 # ------------------------------------------------------------
-# 5. PUBLIC API FOR OTHER CODE (e.g., Flask)
+# 6. PUBLIC API
 # ------------------------------------------------------------
 
 def analyze_deck_from_url(url: str):
@@ -167,7 +223,7 @@ def analyze_deck_from_url(url: str):
 
 
 # ------------------------------------------------------------
-# 6. CLI ENTRY POINT (INTERACTIVE LOOP)
+# 7. CLI ENTRY POINT
 # ------------------------------------------------------------
 
 def main():
