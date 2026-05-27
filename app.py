@@ -5,7 +5,7 @@ import requests
 app = Flask(__name__)
 
 # ------------------------------------------------------------
-# Fetch card image from Scryfall (handles MDFCs safely)
+# Fetch card image from Scryfall (MDFC-safe)
 # ------------------------------------------------------------
 def get_card_image(card_name):
     url = f"https://api.scryfall.com/cards/named?exact={card_name}"
@@ -21,7 +21,7 @@ def get_card_image(card_name):
     if "image_uris" not in r:
         return None
 
-    # Try preferred sizes in order
+    # Preferred sizes
     for size in ["normal", "large", "png", "border_crop", "small"]:
         if size in r["image_uris"]:
             return r["image_uris"][size]
@@ -40,7 +40,7 @@ def home():
         deck_url = request.form.get("deck_url")
 
         try:
-            # Score deck (no images involved)
+            # Score deck
             results = analyze_deck_from_url(deck_url)
 
             # Commander images

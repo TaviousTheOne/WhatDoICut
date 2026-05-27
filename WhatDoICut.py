@@ -2,11 +2,10 @@ import requests
 import re
 
 # ------------------------------------------------------------
-# Scryfall helper (NO caching, NO image data)
+# Scryfall oracle-text fetch (EXACT MATCH ONLY)
 # ------------------------------------------------------------
-
 def get_oracle_data(name: str):
-    """Fetch only oracle_text and type_line from Scryfall. Never cache."""
+    """Fetch oracle_text + type_line using exact match only."""
     url = f"https://api.scryfall.com/cards/named?exact={name}"
     r = requests.get(url).json()
 
@@ -23,7 +22,6 @@ def get_oracle_data(name: str):
 # ------------------------------------------------------------
 # URL Detection
 # ------------------------------------------------------------
-
 def detect_platform(url: str):
     if "moxfield.com" in url:
         return "moxfield"
@@ -35,7 +33,6 @@ def detect_platform(url: str):
 # ------------------------------------------------------------
 # Deck Fetchers
 # ------------------------------------------------------------
-
 def fetch_moxfield(url: str):
     deck_id = url.rstrip("/").split("/")[-1]
     api_url = f"https://api.moxfield.com/v2/decks/all/{deck_id}"
@@ -86,9 +83,8 @@ def fetch_archidekt(url: str):
 
 
 # ------------------------------------------------------------
-# Commander Profile (oracle‑text based)
+# Commander Profile (oracle-text based)
 # ------------------------------------------------------------
-
 def analyze_commander(commander_names):
     tribe = None
     makes_tokens = False
@@ -103,7 +99,7 @@ def analyze_commander(commander_names):
         type_blob += " " + t
         oracle_blob += " " + o
 
-    # Infer tribe from type line
+    # Infer tribe
     common_tribes = [
         "goblin", "elf", "zombie", "soldier", "wizard",
         "dragon", "angel", "vampire", "merfolk", "sliver",
@@ -136,9 +132,8 @@ def analyze_commander(commander_names):
 
 
 # ------------------------------------------------------------
-# Card Scoring Engine (oracle‑text synergy)
+# Card Scoring Engine (oracle-text synergy)
 # ------------------------------------------------------------
-
 def score_card(card_name: str, commander_profile: dict):
     type_line, oracle_text = get_oracle_data(card_name)
     tribe = commander_profile["tribe"]
@@ -193,7 +188,6 @@ def score_card(card_name: str, commander_profile: dict):
 # ------------------------------------------------------------
 # Explanation Engine
 # ------------------------------------------------------------
-
 def explain_cut(card, commander_names):
     name = card["name"]
     score = card["score"]
@@ -250,7 +244,6 @@ def explain_cut(card, commander_names):
 # ------------------------------------------------------------
 # Deck Analysis
 # ------------------------------------------------------------
-
 def analyze_deck(deck):
     commander = deck["commander"]
     cards = deck["cards"]
@@ -269,7 +262,6 @@ def analyze_deck(deck):
 # ------------------------------------------------------------
 # Public API
 # ------------------------------------------------------------
-
 def analyze_deck_from_url(url: str):
     platform = detect_platform(url)
 
@@ -285,12 +277,11 @@ def analyze_deck_from_url(url: str):
 
 
 # ------------------------------------------------------------
-# CLI Entry Point
+# CLI Entry Point (the part you asked for)
 # ------------------------------------------------------------
-
 def main():
     print("=======================================")
-    print("     MTG Commander – What Do I Cut")
+    print("     MTG Commander – What Do I Cut?")
     print("=======================================")
 
     while True:
@@ -303,7 +294,7 @@ def main():
             cuts = result["cuts"]
 
             print(f"\nCommander: {', '.join(commander)}")
-            print("\nThese are the top 5 cards that bring in the least value for what your deck is trying to do:\n")
+            print("\nTop 5 Cuts:")
             for entry in cuts:
                 print(f"- {entry['name']} (score: {entry['score']:.3f})")
 
